@@ -1,0 +1,5 @@
+com\example\minestom\command\SpawnCommand.class
+com\example\minestom\Main.class
+com\example\minestom\world\OverworldGenerator.class
+com\example\minestom\command\GamemodeCommand.class
+com\example\minestom\command\TimeCommand.class

@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Subtle moving backdrop so the single hero composition has depth. */
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+  background-size: 48px 48px;
+  animation: gridDrift 26s linear infinite;
+}
+
+.aurora-shift {
+  background:
+    radial-gradient(circle at 18% 20%, rgba(34, 211, 238, 0.24), transparent 45%),
+    radial-gradient(circle at 85% 18%, rgba(99, 102, 241, 0.28), transparent 40%),
+    radial-gradient(circle at 50% 84%, rgba(6, 182, 212, 0.16), transparent 55%);
+  animation: glowPulse 12s ease-in-out infinite;
+}
+
+@keyframes gridDrift {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(48px, 48px);
+  }
+}
+
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.88;
+    transform: scale(1.05);
+  }
+}
