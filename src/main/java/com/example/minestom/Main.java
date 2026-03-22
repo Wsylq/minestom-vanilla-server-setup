@@ -8,9 +8,12 @@ import net.kyori.adventure.text.Component;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
+import net.minestom.server.coordinate.Vec;
+import net.minestom.server.entity.ItemEntity;
 import net.minestom.server.entity.GameMode;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
+import net.minestom.server.event.item.PickupItemEvent;
 import net.minestom.server.event.player.PlayerBlockBreakEvent;
 import net.minestom.server.event.player.PlayerBlockInteractEvent;
 import net.minestom.server.event.player.PlayerBlockPlaceEvent;
@@ -21,9 +24,12 @@ import net.minestom.server.instance.block.BlockHandler;
 import net.minestom.server.instance.InstanceContainer;
 import net.minestom.server.inventory.Inventory;
 import net.minestom.server.inventory.InventoryType;
+import net.minestom.server.item.ItemStack;
+import net.minestom.server.item.Material;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -158,6 +164,17 @@ public final class Main {
             event.getPlayer().sendMessage("Welcome. This is a vanilla-like Minestom world.");
         });
 
+        // Minestom does not auto-route item entities into player inventory in vanilla style.
+        events.addListener(PickupItemEvent.class, event -> {
+            if (!(event.getLivingEntity() instanceof net.minestom.server.entity.Player player)) {
+                return;
+            }
+
+            ItemStack pickedStack = event.getItemStack();
+            boolean fullyAdded = player.getInventory().addItemStack(pickedStack);
+            event.setCancelled(!fullyAdded);
+        });
+
         events.addListener(PlayerBlockPlaceEvent.class, event -> {
             GameMode gameMode = event.getPlayer().getGameMode();
             if (gameMode == GameMode.SPECTATOR || gameMode == GameMode.ADVENTURE) {
@@ -183,6 +200,25 @@ public final class Main {
             }
 
             event.setResultBlock(Block.AIR);
+
+            if (gameMode == GameMode.CREATIVE) {
+                return;
+            }
+
+            Material dropMaterial = materialForBlock(event.getBlock());
+            if (dropMaterial != null) {
+                ItemEntity drop = new ItemEntity(ItemStack.of(dropMaterial));
+                drop.setPickupDelay(Duration.ofMillis(350));
+                drop.setVelocity(new Vec(0.0, 4.0, 0.0));
+                drop.setInstance(
+                        event.getPlayer().getInstance(),
+                        new Pos(
+                                event.getBlockPosition().blockX() + 0.5,
+                                event.getBlockPosition().blockY() + 0.5,
+                                event.getBlockPosition().blockZ() + 0.5
+                        )
+                );
+            }
         });
 
         // Basic chest/barrel interactions. Minestom requires explicit behavior wiring.
@@ -207,6 +243,28 @@ public final class Main {
         return block.compare(Block.CHEST)
                 || block.compare(Block.TRAPPED_CHEST)
                 || block.compare(Block.BARREL);
+    }
+
+    private static Material materialForBlock(Block block) {
+        if (block.compare(Block.GRASS_BLOCK)) return Material.GRASS_BLOCK;
+        if (block.compare(Block.DIRT)) return Material.DIRT;
+        if (block.compare(Block.STONE)) return Material.COBBLESTONE;
+        if (block.compare(Block.SAND)) return Material.SAND;
+        if (block.compare(Block.OAK_LOG)) return Material.OAK_LOG;
+        if (block.compare(Block.OAK_LEAVES)) return Material.OAK_LEAVES;
+        if (block.compare(Block.SHORT_GRASS)) return Material.SHORT_GRASS;
+        if (block.compare(Block.DANDELION)) return Material.DANDELION;
+        if (block.compare(Block.POPPY)) return Material.POPPY;
+        if (block.compare(Block.AZURE_BLUET)) return Material.AZURE_BLUET;
+        if (block.compare(Block.OXEYE_DAISY)) return Material.OXEYE_DAISY;
+        if (block.compare(Block.CORNFLOWER)) return Material.CORNFLOWER;
+        if (block.compare(Block.COBBLESTONE)) return Material.COBBLESTONE;
+        if (block.compare(Block.OAK_PLANKS)) return Material.OAK_PLANKS;
+        if (block.compare(Block.CRAFTING_TABLE)) return Material.CRAFTING_TABLE;
+        if (block.compare(Block.FURNACE)) return Material.FURNACE;
+        if (block.compare(Block.CHEST)) return Material.CHEST;
+        if (block.compare(Block.BARREL)) return Material.BARREL;
+        return null;
     }
 
     private static String blockKey(Point point) {
