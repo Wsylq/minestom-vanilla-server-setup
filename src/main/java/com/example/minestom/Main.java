@@ -1,8 +1,12 @@
 package com.example.minestom;
 
 import com.example.minestom.command.GamemodeCommand;
+import com.example.minestom.command.GameruleCommand;
 import com.example.minestom.command.SpawnCommand;
 import com.example.minestom.command.TimeCommand;
+import com.example.minestom.command.WeatherCommand;
+import com.example.minestom.command.WorldBorderCommand;
+import com.example.minestom.config.ServerState;
 import com.example.minestom.world.OverworldGenerator;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.MinecraftServer;
@@ -11,6 +15,10 @@ import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.ItemEntity;
 import net.minestom.server.entity.GameMode;
+import net.minestom.server.entity.Entity;
+import net.minestom.server.entity.EntityCreature;
+import net.minestom.server.entity.EntityType;
+import net.minestom.server.entity.Player;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
 import net.minestom.server.event.item.PickupItemEvent;
@@ -26,17 +34,20 @@ import net.minestom.server.inventory.Inventory;
 import net.minestom.server.inventory.InventoryType;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
+import net.minestom.server.timer.TaskSchedule;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class Main {
 
     private static final Pos SPAWN_POSITION = new Pos(0.5, 90, 0.5);
     private static final Map<String, Inventory> STORAGE_INVENTORIES = new ConcurrentHashMap<>();
+    private static final ServerState SERVER_STATE = new ServerState();
 
     private Main() {
     }
@@ -46,6 +57,7 @@ public final class Main {
 
         InstanceContainer overworld = MinecraftServer.getInstanceManager().createInstanceContainer();
         overworld.setGenerator(new OverworldGenerator());
+        overworld.setTime(SERVER_STATE.getWorldTime());
         configureWorldLoader(overworld);
         // Preload spawn chunk so first join does not see an empty/black world while chunk tasks warm up.
         overworld.loadChunk(0, 0);
@@ -54,8 +66,23 @@ public final class Main {
 
         registerEvents(overworld);
         registerCommands(overworld);
+        registerSchedulers(overworld);
 
         minecraftServer.start(resolveAddress(), resolvePort());
+    }
+
+    private static void registerSchedulers(InstanceContainer overworld) {
+        MinecraftServer.getSchedulerManager().submitTask(() -> {
+            try {
+                tickWorldLifecycle(overworld);
+                enforceWorldBorder(overworld);
+                tickNaturalSpawns(overworld);
+                tickDespawn(overworld);
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
+            return TaskSchedule.seconds(1);
+        });
     }
 
     private static void configureWorldLoader(InstanceContainer instance) {
@@ -161,17 +188,20 @@ public final class Main {
 
             event.getPlayer().teleport(SPAWN_POSITION);
             event.getPlayer().setGameMode(GameMode.SURVIVAL);
-            event.getPlayer().sendMessage("Welcome. This is a vanilla-like Minestom world.");
+            event.getPlayer().sendMessage("Welcome. Vanilla-like survival baseline is active.");
         });
 
         // Minestom does not auto-route item entities into player inventory in vanilla style.
         events.addListener(PickupItemEvent.class, event -> {
-            if (!(event.getLivingEntity() instanceof net.minestom.server.entity.Player player)) {
+            if (!(event.getLivingEntity() instanceof Player player)) {
                 return;
             }
 
-            ItemStack pickedStack = event.getItemStack();
+            ItemStack pickedStack = event.getItemEntity().getItemStack();
             boolean fullyAdded = player.getInventory().addItemStack(pickedStack);
+            if (fullyAdded) {
+                event.getItemEntity().remove();
+            }
             event.setCancelled(!fullyAdded);
         });
 
@@ -249,7 +279,22 @@ public final class Main {
         if (block.compare(Block.GRASS_BLOCK)) return Material.GRASS_BLOCK;
         if (block.compare(Block.DIRT)) return Material.DIRT;
         if (block.compare(Block.STONE)) return Material.COBBLESTONE;
+        if (block.compare(Block.DEEPSLATE)) return Material.COBBLED_DEEPSLATE;
         if (block.compare(Block.SAND)) return Material.SAND;
+        if (block.compare(Block.COAL_ORE)) return Material.COAL;
+        if (block.compare(Block.IRON_ORE)) return Material.RAW_IRON;
+        if (block.compare(Block.COPPER_ORE)) return Material.RAW_COPPER;
+        if (block.compare(Block.GOLD_ORE)) return Material.RAW_GOLD;
+        if (block.compare(Block.REDSTONE_ORE)) return Material.REDSTONE;
+        if (block.compare(Block.LAPIS_ORE)) return Material.LAPIS_LAZULI;
+        if (block.compare(Block.DIAMOND_ORE)) return Material.DIAMOND;
+        if (block.compare(Block.DEEPSLATE_COAL_ORE)) return Material.COAL;
+        if (block.compare(Block.DEEPSLATE_IRON_ORE)) return Material.RAW_IRON;
+        if (block.compare(Block.DEEPSLATE_COPPER_ORE)) return Material.RAW_COPPER;
+        if (block.compare(Block.DEEPSLATE_GOLD_ORE)) return Material.RAW_GOLD;
+        if (block.compare(Block.DEEPSLATE_REDSTONE_ORE)) return Material.REDSTONE;
+        if (block.compare(Block.DEEPSLATE_LAPIS_ORE)) return Material.LAPIS_LAZULI;
+        if (block.compare(Block.DEEPSLATE_DIAMOND_ORE)) return Material.DIAMOND;
         if (block.compare(Block.OAK_LOG)) return Material.OAK_LOG;
         if (block.compare(Block.OAK_LEAVES)) return Material.OAK_LEAVES;
         if (block.compare(Block.SHORT_GRASS)) return Material.SHORT_GRASS;
@@ -271,9 +316,183 @@ public final class Main {
         return point.blockX() + ":" + point.blockY() + ":" + point.blockZ();
     }
 
+    private static void tickWorldLifecycle(InstanceContainer instance) {
+        if (SERVER_STATE.doDaylightCycle()) {
+            SERVER_STATE.tickTime(20);
+            instance.setTime(SERVER_STATE.getWorldTime());
+        }
+
+        if (!SERVER_STATE.doWeatherCycle()) {
+            return;
+        }
+
+        double roll = ThreadLocalRandom.current().nextDouble();
+        if (SERVER_STATE.getWeather() == ServerState.Weather.CLEAR && roll < 0.0025) {
+            SERVER_STATE.setWeather(ServerState.Weather.RAIN);
+            MinecraftServer.getConnectionManager().getOnlinePlayers().forEach(player ->
+                    player.sendMessage("Weather changed: rain")
+            );
+        } else if (SERVER_STATE.getWeather() == ServerState.Weather.RAIN && roll < 0.0015) {
+            SERVER_STATE.setWeather(ServerState.Weather.THUNDER);
+            MinecraftServer.getConnectionManager().getOnlinePlayers().forEach(player ->
+                    player.sendMessage("Weather changed: thunder")
+            );
+        } else if (SERVER_STATE.getWeather() != ServerState.Weather.CLEAR && roll < 0.0020) {
+            SERVER_STATE.setWeather(ServerState.Weather.CLEAR);
+            MinecraftServer.getConnectionManager().getOnlinePlayers().forEach(player ->
+                    player.sendMessage("Weather changed: clear")
+            );
+        }
+    }
+
+    private static void enforceWorldBorder(InstanceContainer instance) {
+        int border = SERVER_STATE.getWorldBorderRadius();
+        for (Player player : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+            if (player.getInstance() != instance) {
+                continue;
+            }
+
+            int x = player.getPosition().blockX();
+            int z = player.getPosition().blockZ();
+            if (Math.abs(x) <= border && Math.abs(z) <= border) {
+                continue;
+            }
+
+            int clampedX = Math.max(-border + 1, Math.min(border - 1, x));
+            int clampedZ = Math.max(-border + 1, Math.min(border - 1, z));
+            int safeY = findSurfaceY(instance, clampedX, clampedZ);
+            if (safeY == Integer.MIN_VALUE) {
+                safeY = SPAWN_POSITION.blockY();
+            }
+
+            player.teleport(new Pos(clampedX + 0.5, safeY, clampedZ + 0.5));
+            player.sendMessage("You reached the world border.");
+        }
+    }
+
+    private static void tickNaturalSpawns(InstanceContainer instance) {
+        if (!SERVER_STATE.doMobSpawning()) {
+            return;
+        }
+
+        if (MinecraftServer.getConnectionManager().getOnlinePlayers().isEmpty()) {
+            return;
+        }
+
+        long hostileCount = instance.getEntities().stream()
+                .map(Entity::getEntityType)
+                .filter(type -> type == EntityType.ZOMBIE || type == EntityType.SKELETON || type == EntityType.SPIDER)
+                .count();
+
+        long passiveCount = instance.getEntities().stream()
+                .map(Entity::getEntityType)
+                .filter(type -> type == EntityType.COW || type == EntityType.SHEEP || type == EntityType.PIG || type == EntityType.CHICKEN)
+                .count();
+
+        boolean night = SERVER_STATE.isNight();
+        if (night && hostileCount >= 48) {
+            return;
+        }
+        if (!night && passiveCount >= 40) {
+            return;
+        }
+
+        for (Player player : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+            if (player.getInstance() != instance) {
+                continue;
+            }
+
+            int dx = ThreadLocalRandom.current().nextInt(-24, 25);
+            int dz = ThreadLocalRandom.current().nextInt(-24, 25);
+            int spawnX = player.getPosition().blockX() + dx;
+            int spawnZ = player.getPosition().blockZ() + dz;
+            int spawnY = findSurfaceY(instance, spawnX, spawnZ);
+            if (spawnY == Integer.MIN_VALUE) {
+                continue;
+            }
+
+            Block feet = instance.getBlock(spawnX, spawnY, spawnZ);
+            Block body = instance.getBlock(spawnX, spawnY + 1, spawnZ);
+            Block below = instance.getBlock(spawnX, spawnY - 1, spawnZ);
+
+            if (!feet.isAir() || !body.isAir() || below.isAir() || below.compare(Block.WATER)) {
+                continue;
+            }
+
+            EntityType type;
+            double roll = ThreadLocalRandom.current().nextDouble();
+            if (night) {
+                if (roll < 0.5) {
+                    type = EntityType.ZOMBIE;
+                } else if (roll < 0.8) {
+                    type = EntityType.SKELETON;
+                } else {
+                    type = EntityType.SPIDER;
+                }
+            } else {
+                if (roll < 0.35) {
+                    type = EntityType.COW;
+                } else if (roll < 0.65) {
+                    type = EntityType.SHEEP;
+                } else if (roll < 0.85) {
+                    type = EntityType.PIG;
+                } else {
+                    type = EntityType.CHICKEN;
+                }
+            }
+
+            EntityCreature creature = new EntityCreature(type);
+            creature.setInstance(instance, new Pos(spawnX + 0.5, spawnY, spawnZ + 0.5));
+            break;
+        }
+    }
+
+    private static void tickDespawn(InstanceContainer instance) {
+        for (Entity entity : instance.getEntities()) {
+            EntityType type = entity.getEntityType();
+            boolean managed = type == EntityType.ZOMBIE || type == EntityType.SKELETON || type == EntityType.SPIDER
+                    || type == EntityType.COW || type == EntityType.SHEEP || type == EntityType.PIG || type == EntityType.CHICKEN;
+            if (!managed) {
+                continue;
+            }
+
+            boolean nearAnyPlayer = false;
+            for (Player player : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+                if (player.getInstance() != instance) {
+                    continue;
+                }
+
+                int dx = player.getPosition().blockX() - entity.getPosition().blockX();
+                int dz = player.getPosition().blockZ() - entity.getPosition().blockZ();
+                if (dx * dx + dz * dz <= 96 * 96) {
+                    nearAnyPlayer = true;
+                    break;
+                }
+            }
+
+            if (!nearAnyPlayer) {
+                entity.remove();
+            }
+        }
+    }
+
+    private static int findSurfaceY(InstanceContainer instance, int x, int z) {
+        for (int y = 120; y >= -62; y--) {
+            Block current = instance.getBlock(x, y, z);
+            Block above = instance.getBlock(x, y + 1, z);
+            if (!current.isAir() && above.isAir()) {
+                return y + 1;
+            }
+        }
+        return Integer.MIN_VALUE;
+    }
+
     private static void registerCommands(InstanceContainer overworld) {
         MinecraftServer.getCommandManager().register(new SpawnCommand());
-        MinecraftServer.getCommandManager().register(new TimeCommand(overworld));
+        MinecraftServer.getCommandManager().register(new TimeCommand(overworld, SERVER_STATE));
         MinecraftServer.getCommandManager().register(new GamemodeCommand());
+        MinecraftServer.getCommandManager().register(new WeatherCommand(SERVER_STATE));
+        MinecraftServer.getCommandManager().register(new GameruleCommand(SERVER_STATE));
+        MinecraftServer.getCommandManager().register(new WorldBorderCommand(SERVER_STATE));
     }
 }

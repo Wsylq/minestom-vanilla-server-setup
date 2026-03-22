@@ -1,12 +1,19 @@
 package com.example.minestom.command;
 
+import com.example.minestom.config.ServerState;
 import net.minestom.server.command.builder.Command;
 import net.minestom.server.command.builder.arguments.ArgumentType;
 import net.minestom.server.instance.Instance;
 
 public final class TimeCommand extends Command {
 
+    // Backward-compatible overload so Main can pass shared server state,
+    // while older call sites using only Instance still compile.
     public TimeCommand(Instance overworld) {
+        this(overworld, null);
+    }
+
+    public TimeCommand(Instance overworld, ServerState state) {
         super("time");
 
         var valueArgument = ArgumentType.Word("value");
@@ -28,6 +35,9 @@ public final class TimeCommand extends Command {
                 return;
             }
 
+            if (state != null) {
+                state.setWorldTime(time);
+            }
             overworld.setTime(time);
             sender.sendMessage("Set world time to " + value + ".");
         }, valueArgument);

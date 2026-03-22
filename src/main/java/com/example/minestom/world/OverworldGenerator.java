@@ -13,6 +13,7 @@ public final class OverworldGenerator implements Generator {
     private static final int SEA_LEVEL = 62;
     private static final int BASE_HEIGHT = 68;
     private static final long WORLD_SEED = 741_337_114L;
+    private static final int CAVE_CEILING = 40;
 
     @Override
     public void generate(GenerationUnit unit) {
@@ -35,7 +36,14 @@ public final class OverworldGenerator implements Generator {
 
                 int terrainMax = Math.min(top, maxY);
                 for (int y = minY; y <= terrainMax; y++) {
-                    modifier.setBlock(new Vec(worldX, y, worldZ), selectBlock(y, top));
+                    Block block = selectBlock(worldX, y, worldZ, top);
+
+                    // Carve underground caves to avoid solid-stone worlds.
+                    if (isCave(worldX, y, worldZ, top)) {
+                        block = y <= 10 ? Block.WATER : Block.AIR;
+                    }
+
+                    modifier.setBlock(new Vec(worldX, y, worldZ), block);
                 }
 
                 if (top < SEA_LEVEL) {
@@ -203,16 +211,63 @@ public final class OverworldGenerator implements Generator {
         return (hashed(x, z, salt) & 0x7fffffff) / (double) Integer.MAX_VALUE;
     }
 
-    private static Block selectBlock(int y, int surfaceY) {
+    private static Block selectBlock(int worldX, int y, int worldZ, int surfaceY) {
         if (y <= MIN_WORLD_Y) {
             return Block.BEDROCK;
         }
+
+        if (y < surfaceY - 4) {
+            return selectUndergroundBlock(worldX, y, worldZ);
+        }
+
         if (y == surfaceY) {
             return surfaceY <= SEA_LEVEL ? Block.SAND : Block.GRASS_BLOCK;
         }
         if (y >= surfaceY - 3) {
             return surfaceY <= SEA_LEVEL ? Block.SAND : Block.DIRT;
         }
-        return Block.STONE;
+        return selectUndergroundBlock(worldX, y, worldZ);
+    }
+
+    private static Block selectUndergroundBlock(int x, int y, int z) {
+        Block base = y < 0 ? Block.DEEPSLATE : Block.STONE;
+
+        // Very lightweight ore distribution to make survival progression possible.
+        if (y >= 48 && rand01(x, z + y * 31, 8_101) < 0.005) {
+            return Block.COAL_ORE;
+        }
+        if (y >= 0 && y <= 64 && rand01(x, z + y * 17, 8_707) < 0.0035) {
+            return Block.IRON_ORE;
+        }
+        if (y >= -16 && y <= 64 && rand01(x, z + y * 13, 8_909) < 0.0035) {
+            return Block.COPPER_ORE;
+        }
+        if (y >= -32 && y <= 32 && rand01(x, z + y * 11, 9_223) < 0.0018) {
+            return y < 0 ? Block.DEEPSLATE_GOLD_ORE : Block.GOLD_ORE;
+        }
+        if (y <= 16 && rand01(x, z + y * 7, 9_421) < 0.0012) {
+            return y < 0 ? Block.DEEPSLATE_REDSTONE_ORE : Block.REDSTONE_ORE;
+        }
+        if (y <= 24 && rand01(x, z + y * 5, 9_929) < 0.0014) {
+            return y < 0 ? Block.DEEPSLATE_LAPIS_ORE : Block.LAPIS_ORE;
+        }
+        if (y <= 0 && rand01(x, z + y * 3, 10_007) < 0.0009) {
+            return y < -8 ? Block.DEEPSLATE_DIAMOND_ORE : Block.DIAMOND_ORE;
+        }
+
+        return base;
+    }
+
+    private static boolean isCave(int x, int y, int z, int surfaceY) {
+        if (y >= Math.min(CAVE_CEILING, surfaceY - 3) || y <= MIN_WORLD_Y + 1) {
+            return false;
+        }
+
+        double noiseA = Math.sin((x + WORLD_SEED) * 0.054) + Math.cos((z - WORLD_SEED) * 0.049);
+        double noiseB = Math.sin((x + z) * 0.037 + y * 0.08);
+        double noiseC = Math.cos((x - z) * 0.041 - y * 0.067);
+        double caveDensity = noiseA + noiseB + noiseC;
+
+        return caveDensity > 2.12;
     }
 }

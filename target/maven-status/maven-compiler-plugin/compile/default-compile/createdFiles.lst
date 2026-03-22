@@ -1,5 +1,10 @@
 com\example\minestom\command\SpawnCommand.class
+com\example\minestom\command\WeatherCommand.class
+com\example\minestom\config\ServerState$Weather.class
+com\example\minestom\command\TimeCommand.class
+com\example\minestom\command\WorldBorderCommand.class
+com\example\minestom\config\ServerState.class
 com\example\minestom\Main.class
+com\example\minestom\command\GameruleCommand.class
 com\example\minestom\world\OverworldGenerator.class
 com\example\minestom\command\GamemodeCommand.class
-com\example\minestom\command\TimeCommand.class
