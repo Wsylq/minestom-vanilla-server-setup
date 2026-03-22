@@ -6,7 +6,7 @@ import net.minestom.server.entity.Player;
 
 public final class SpawnCommand extends Command {
 
-    private static final Pos SPAWN = new Pos(0.5, 74, 0.5);
+    private static final Pos SPAWN = new Pos(0.5, 90, 0.5);
 
     public SpawnCommand() {
         super("spawn");

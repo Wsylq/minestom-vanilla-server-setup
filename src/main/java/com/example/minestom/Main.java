@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class Main {
 
-    private static final Pos SPAWN_POSITION = new Pos(0.5, 74, 0.5);
+    private static final Pos SPAWN_POSITION = new Pos(0.5, 90, 0.5);
     private static final Map<String, Inventory> STORAGE_INVENTORIES = new ConcurrentHashMap<>();
 
     private Main() {
@@ -41,6 +41,8 @@ public final class Main {
         InstanceContainer overworld = MinecraftServer.getInstanceManager().createInstanceContainer();
         overworld.setGenerator(new OverworldGenerator());
         configureWorldLoader(overworld);
+        // Preload spawn chunk so first join does not see an empty/black world while chunk tasks warm up.
+        overworld.loadChunk(0, 0);
 
         registerBlockHandlers();
 
@@ -59,6 +61,12 @@ public final class Main {
         Path path = Path.of(worldPath);
         if (!Files.exists(path)) {
             System.err.println("WORLD_PATH was provided, but it does not exist: " + worldPath);
+            return;
+        }
+
+        Path regionPath = path.resolve("region");
+        if (!Files.isDirectory(regionPath)) {
+            System.err.println("WORLD_PATH has no region folder. Falling back to generated world: " + worldPath);
             return;
         }
 
@@ -145,6 +153,7 @@ public final class Main {
                 return;
             }
 
+            event.getPlayer().teleport(SPAWN_POSITION);
             event.getPlayer().setGameMode(GameMode.SURVIVAL);
             event.getPlayer().sendMessage("Welcome. This is a vanilla-like Minestom world.");
         });
