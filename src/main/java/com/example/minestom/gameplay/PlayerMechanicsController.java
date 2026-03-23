@@ -71,8 +71,8 @@ public final class PlayerMechanicsController {
         }
         EXHAUSTION.put(id, exhaustion);
 
-        if (food <= 0 && tickCounter % 40 == 0) {
-            damagePlayer(player, 1.0f);
+        if (food <= 0 && tickCounter % 80 == 0) {
+            CombatController.damagePlayer(player, 1.0f);
         }
 
         invokeIntSetter(player, "setFood", food);
@@ -100,18 +100,9 @@ public final class PlayerMechanicsController {
         }
 
         int ticks = UNDERWATER_TICKS.merge(id, 1, Integer::sum);
-        if (ticks > 200 && tickCounter % 20 == 0) {
-            damagePlayer(player, 1.0f);
+        if (ticks > 240 && tickCounter % 20 == 0) {
+            CombatController.damagePlayer(player, 1.0f);
         }
-    }
-
-    private static void damagePlayer(Player player, float damage) {
-        Float health = invokeFloatGetter(player, "getHealth");
-        if (health == null) {
-            return;
-        }
-        float next = Math.max(0.0f, health - damage);
-        invokeFloatSetter(player, "setHealth", next);
     }
 
     private static boolean invokeBoolean(Object instance, String methodName) {
@@ -134,16 +125,6 @@ public final class PlayerMechanicsController {
         }
     }
 
-    private static Float invokeFloatGetter(Object instance, String methodName) {
-        try {
-            Method method = instance.getClass().getMethod(methodName);
-            Object value = method.invoke(instance);
-            return value instanceof Float floatValue ? floatValue : null;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
     private static void invokeIntSetter(Object instance, String methodName, int value) {
         try {
             Method method = instance.getClass().getMethod(methodName, int.class);
@@ -152,11 +133,4 @@ public final class PlayerMechanicsController {
         }
     }
 
-    private static void invokeFloatSetter(Object instance, String methodName, float value) {
-        try {
-            Method method = instance.getClass().getMethod(methodName, float.class);
-            method.invoke(instance, value);
-        } catch (Exception ignored) {
-        }
-    }
 }

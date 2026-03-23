@@ -12,10 +12,14 @@ import com.example.minestom.bootstrap.WorldLoaderConfigurator;
 import com.example.minestom.config.RuntimeSettings;
 import com.example.minestom.config.ServerState;
 import com.example.minestom.gameplay.BlockDropTable;
+import com.example.minestom.gameplay.CombatController;
+import com.example.minestom.gameplay.FoodController;
 import com.example.minestom.gameplay.PlayerMechanicsController;
 import com.example.minestom.gameplay.RecipeProgressionController;
+import com.example.minestom.gameplay.SimpleRecipeController;
 import com.example.minestom.gameplay.WorkstationController;
 import com.example.minestom.mob.MobAiController;
+import com.example.minestom.persistence.RemoteSyncClient;
 import com.example.minestom.world.EndGenerator;
 import com.example.minestom.world.NetherGenerator;
 import com.example.minestom.world.OverworldGenerator;
@@ -83,6 +87,7 @@ public final class Main {
     public static void main(String[] args) {
         MinecraftServer minecraftServer = MinecraftServer.init();
         AuthBootstrap.configure(RUNTIME.onlineMode());
+        RemoteSyncClient.initialize(RUNTIME, SERVER_STATE);
         bootstrapMobRegistry();
 
         InstanceContainer overworld = MinecraftServer.getInstanceManager().createInstanceContainer();
@@ -162,10 +167,14 @@ public final class Main {
                 overworld.saveChunksToStorage();
                 nether.saveChunksToStorage();
                 end.saveChunksToStorage();
+                RemoteSyncClient.pushSnapshot(
+                        SERVER_STATE,
+                        List.copyOf(MinecraftServer.getConnectionManager().getOnlinePlayers())
+                );
             } catch (Exception exception) {
                 exception.printStackTrace();
             }
-            return TaskSchedule.seconds(30);
+            return TaskSchedule.seconds(3);
         });
     }
 
@@ -194,6 +203,7 @@ public final class Main {
 
             event.getPlayer().teleport(SPAWN_POSITION);
             event.getPlayer().setGameMode(GameMode.SURVIVAL);
+            RemoteSyncClient.applyPlayerState(event.getPlayer());
             event.getPlayer().sendMessage("Welcome. Vanilla-like survival baseline is active.");
         });
 
@@ -260,6 +270,10 @@ public final class Main {
 
         // Basic chest/barrel interactions. Minestom requires explicit behavior wiring.
         events.addListener(PlayerBlockInteractEvent.class, event -> {
+            if (SimpleRecipeController.tryCraftLogToPlanks(event)) {
+                return;
+            }
+
             if (WorkstationController.handleInteraction(event)) {
                 return;
             }
@@ -281,9 +295,12 @@ public final class Main {
 
         events.addListener(EntityAttackEvent.class, event -> {
             if (event.getEntity() instanceof Player && event.getTarget() instanceof Entity target) {
+                CombatController.handlePlayerAttack(event);
                 tryMakeNeutralAngry(target);
             }
         });
+
+        registerFoodUseListener(events);
 
         events.addListener(EntityDeathEvent.class, event -> {
             Entity dead = event.getEntity();
@@ -330,6 +347,33 @@ public final class Main {
             responseData.getClass().getMethod("description", Component.class).invoke(responseData, description);
         } catch (Exception ignored) {
             // No-op if this Minestom build exposes a different ping API.
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void registerFoodUseListener(GlobalEventHandler events) {
+        try {
+            Class<?> useItemEventClass = Class.forName("net.minestom.server.event.player.PlayerUseItemEvent");
+            events.addListener((Class) useItemEventClass, event -> {
+                try {
+                    Object playerObj = event.getClass().getMethod("getPlayer").invoke(event);
+                    if (!(playerObj instanceof Player player)) {
+                        return;
+                    }
+
+                    if (FoodController.tryEatFromMainHand(player)) {
+                        try {
+                            event.getClass().getMethod("setCancelled", boolean.class).invoke(event, true);
+                        } catch (Exception ignored) {
+                            // Some versions expose non-cancellable use-item events.
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Ignore for compatibility with API shape differences.
+                }
+            });
+        } catch (ClassNotFoundException ignored) {
+            // Older Minestom builds may not expose this event class.
         }
     }
 
@@ -584,6 +628,7 @@ public final class Main {
 
     private static void tickSimpleAi(InstanceContainer instance) {
         MobAiController.tickAi(instance, CHASER_MOBS);
+        CombatController.tickMobMeleeDamage(instance, HOSTILE_MOBS);
     }
 
     private static void tickBreeding(InstanceContainer instance) {

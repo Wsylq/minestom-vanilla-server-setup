@@ -12,7 +12,11 @@ public record RuntimeSettings(
         int bindPort,
         String worldPath,
         boolean onlineMode,
-        String motd
+        String motd,
+        boolean remoteSyncEnabled,
+        String remoteSyncUrl,
+        String remoteSyncToken,
+        String remoteSyncServerId
 ) {
 
     private static final String FILE_NAME = "server.properties";
@@ -52,7 +56,43 @@ public record RuntimeSettings(
                 fileProperties.getProperty("motd", "Minestom Vanilla-like Server")
         );
 
-        return new RuntimeSettings(bindAddress, bindPort, worldPath, onlineMode, motd);
+        boolean remoteSyncEnabled = parseBoolean(
+                firstNonBlank(
+                        System.getenv("REMOTE_SYNC_ENABLED"),
+                        System.getProperty("server.remote-sync-enabled"),
+                        fileProperties.getProperty("remote-sync-enabled", "false")
+                )
+        );
+
+        String remoteSyncUrl = firstNonBlank(
+                System.getenv("REMOTE_SYNC_URL"),
+                System.getProperty("server.remote-sync-url"),
+                fileProperties.getProperty("remote-sync-url", "")
+        );
+
+        String remoteSyncToken = firstNonBlank(
+                System.getenv("REMOTE_SYNC_TOKEN"),
+                System.getProperty("server.remote-sync-token"),
+                fileProperties.getProperty("remote-sync-token", "")
+        );
+
+        String remoteSyncServerId = firstNonBlank(
+                System.getenv("REMOTE_SYNC_SERVER_ID"),
+                System.getProperty("server.remote-sync-server-id"),
+                fileProperties.getProperty("remote-sync-server-id", "default")
+        );
+
+        return new RuntimeSettings(
+                bindAddress,
+                bindPort,
+                worldPath,
+                onlineMode,
+                motd,
+                remoteSyncEnabled,
+                remoteSyncUrl,
+                remoteSyncToken,
+                remoteSyncServerId
+        );
     }
 
     private static Properties loadOrCreateServerProperties() {
@@ -85,6 +125,10 @@ public record RuntimeSettings(
         properties.setProperty("online-mode", "false");
         properties.setProperty("motd", "Minestom Vanilla-like Server");
         properties.setProperty("world-path", "");
+        properties.setProperty("remote-sync-enabled", "false");
+        properties.setProperty("remote-sync-url", "");
+        properties.setProperty("remote-sync-token", "");
+        properties.setProperty("remote-sync-server-id", "default");
         return properties;
     }
 

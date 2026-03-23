@@ -70,13 +70,13 @@ public final class MobAiController {
                 }
             }
 
-            // Keep fallback movement smooth and low-speed if navigator API is unavailable.
+            // Keep fallback movement smooth and grounded if navigator API is unavailable.
             Vec direction = nearest.getPosition().asVec().sub(creature.getPosition().asVec());
             if (Math.abs(direction.x()) < 0.4 && Math.abs(direction.z()) < 0.4) {
                 continue;
             }
             Vec horizontal = new Vec(direction.x(), 0, direction.z()).normalize();
-            creature.setVelocity(horizontal.mul(0.8));
+            creature.setVelocity(horizontal.mul(0.22));
         }
     }
 
