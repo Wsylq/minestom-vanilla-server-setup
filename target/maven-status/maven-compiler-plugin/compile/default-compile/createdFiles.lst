@@ -5,9 +5,15 @@ com\example\minestom\command\WeatherCommand.class
 com\example\minestom\command\TimeCommand.class
 com\example\minestom\config\ServerState.class
 com\example\minestom\Main.class
+com\example\minestom\bootstrap\AuthBootstrap.class
 com\example\minestom\world\OverworldGenerator.class
+com\example\minestom\bootstrap\WorldLoaderConfigurator.class
+com\example\minestom\gameplay\WorkstationController.class
+com\example\minestom\gameplay\RecipeProgressionController.class
 com\example\minestom\mob\MobAiController.class
+com\example\minestom\gameplay\PlayerMechanicsController.class
 com\example\minestom\command\DimensionCommand.class
+com\example\minestom\config\RuntimeSettings.class
 com\example\minestom\config\ServerState$Weather.class
 com\example\minestom\command\WorldBorderCommand.class
 com\example\minestom\world\NetherGenerator.class

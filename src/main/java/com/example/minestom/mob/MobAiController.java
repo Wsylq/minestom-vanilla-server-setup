@@ -10,12 +10,17 @@ import net.minestom.server.entity.Player;
 import net.minestom.server.instance.InstanceContainer;
 
 import java.lang.reflect.Method;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class MobAiController {
 
     private static final Set<EntityType> NEUTRAL_MOBS = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, Long> NEUTRAL_ANGER_UNTIL = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> NEXT_PATHFIND_AT = new ConcurrentHashMap<>();
     private static volatile Method setPathToMethod;
 
     private MobAiController() {
@@ -25,6 +30,13 @@ public final class MobAiController {
         if (type != null) {
             NEUTRAL_MOBS.add(type);
         }
+    }
+
+    public static void makeNeutralAngry(Entity entity) {
+        if (entity == null) {
+            return;
+        }
+        NEUTRAL_ANGER_UNTIL.put(entity.getUuid(), System.currentTimeMillis() + 45_000L);
     }
 
     public static void tickAi(InstanceContainer instance, Set<EntityType> chaserMobs) {
@@ -42,25 +54,40 @@ public final class MobAiController {
             }
 
             if (NEUTRAL_MOBS.contains(creature.getEntityType())) {
+                long angryUntil = NEUTRAL_ANGER_UNTIL.getOrDefault(creature.getUuid(), 0L);
                 int distX = nearest.getPosition().blockX() - creature.getPosition().blockX();
                 int distZ = nearest.getPosition().blockZ() - creature.getPosition().blockZ();
-                if (distX * distX + distZ * distZ > 8 * 8) {
+                boolean proximityAggro = distX * distX + distZ * distZ <= 6 * 6;
+                boolean angerAggro = angryUntil > System.currentTimeMillis();
+                if (!proximityAggro && !angerAggro) {
                     continue;
                 }
             }
 
-            if (tryNavigatorPath(creature, nearest)) {
-                continue;
+            if (shouldRefreshPath(creature)) {
+                if (tryNavigatorPath(creature, nearest)) {
+                    continue;
+                }
             }
 
-            // Fallback for snapshots where navigator methods changed.
+            // Keep fallback movement smooth and low-speed if navigator API is unavailable.
             Vec direction = nearest.getPosition().asVec().sub(creature.getPosition().asVec());
-            if (Math.abs(direction.x()) < 0.1 && Math.abs(direction.z()) < 0.1) {
+            if (Math.abs(direction.x()) < 0.4 && Math.abs(direction.z()) < 0.4) {
                 continue;
             }
             Vec horizontal = new Vec(direction.x(), 0, direction.z()).normalize();
-            creature.setVelocity(horizontal.mul(4.0));
+            creature.setVelocity(horizontal.mul(0.8));
         }
+    }
+
+    private static boolean shouldRefreshPath(EntityCreature creature) {
+        long now = System.currentTimeMillis();
+        long next = NEXT_PATHFIND_AT.getOrDefault(creature.getUuid(), 0L);
+        if (now < next) {
+            return false;
+        }
+        NEXT_PATHFIND_AT.put(creature.getUuid(), now + ThreadLocalRandom.current().nextLong(250, 450));
+        return true;
     }
 
     private static boolean tryNavigatorPath(EntityCreature creature, Player target) {
