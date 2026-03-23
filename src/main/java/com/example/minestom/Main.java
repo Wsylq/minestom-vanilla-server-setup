@@ -129,6 +129,11 @@ public final class Main {
                 tickSimpleAi(nether);
                 tickSimpleAi(end);
                 PlayerMechanicsController.tickPlayers();
+                RemoteSyncClient.pollAndApplyRemoteChanges(Map.of(
+                        "overworld", overworld,
+                        "nether", nether,
+                        "end", end
+                ));
             } catch (Exception exception) {
                 exception.printStackTrace();
             }
@@ -174,7 +179,7 @@ public final class Main {
             } catch (Exception exception) {
                 exception.printStackTrace();
             }
-            return TaskSchedule.seconds(3);
+            return TaskSchedule.seconds(RUNTIME.persistIntervalSeconds());
         });
     }
 
@@ -192,11 +197,18 @@ public final class Main {
         events.addListener(ServerListPingEvent.class, event -> applyMotd(event, RUNTIME.motd()));
 
         events.addListener(AsyncPlayerConfigurationEvent.class, event -> {
+            if (!RUNTIME.authoritativeNode()) {
+                disconnectReadOnlyNodePlayer(event.getPlayer());
+                return;
+            }
             event.setSpawningInstance(overworld);
             event.getPlayer().setRespawnPoint(SPAWN_POSITION);
         });
 
         events.addListener(PlayerSpawnEvent.class, event -> {
+            if (!RUNTIME.authoritativeNode()) {
+                return;
+            }
             if (!event.isFirstSpawn()) {
                 return;
             }
@@ -226,6 +238,27 @@ public final class Main {
             GameMode gameMode = event.getPlayer().getGameMode();
             if (gameMode == GameMode.SPECTATOR || gameMode == GameMode.ADVENTURE) {
                 event.setCancelled(true);
+                return;
+            }
+
+            String dimension = resolveDimension(event.getPlayer().getInstance());
+            String namespace = null;
+            try {
+                Object block = event.getClass().getMethod("getBlock").invoke(event);
+                if (block instanceof Block typedBlock) {
+                    namespace = blockNamespace(typedBlock);
+                }
+            } catch (Exception ignored) {
+                // Version-safe fallback when place event shape differs.
+            }
+            if (dimension != null && namespace != null) {
+                RemoteSyncClient.publishBlockUpdate(
+                        dimension,
+                        event.getBlockPosition().blockX(),
+                        event.getBlockPosition().blockY(),
+                        event.getBlockPosition().blockZ(),
+                        namespace
+                );
             }
         });
 
@@ -247,6 +280,16 @@ public final class Main {
             }
 
             event.setResultBlock(Block.AIR);
+            String dimension = resolveDimension(event.getPlayer().getInstance());
+            if (dimension != null) {
+                RemoteSyncClient.publishBlockUpdate(
+                        dimension,
+                        event.getBlockPosition().blockX(),
+                        event.getBlockPosition().blockY(),
+                        event.getBlockPosition().blockZ(),
+                        "minecraft:air"
+                );
+            }
 
             if (gameMode == GameMode.CREATIVE) {
                 return;
@@ -301,6 +344,7 @@ public final class Main {
         });
 
         registerFoodUseListener(events);
+        registerChatRelayListener(events);
 
         events.addListener(EntityDeathEvent.class, event -> {
             Entity dead = event.getEntity();
@@ -321,6 +365,30 @@ public final class Main {
                 drop.setInstance(dead.getInstance(), new Pos(position.x(), position.y() + 0.5, position.z()));
             }
         });
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void registerChatRelayListener(GlobalEventHandler events) {
+        try {
+            Class<?> chatEventClass = Class.forName("net.minestom.server.event.player.PlayerChatEvent");
+            events.addListener((Class) chatEventClass, event -> {
+                try {
+                    Object playerObj = event.getClass().getMethod("getPlayer").invoke(event);
+                    Object messageObj = event.getClass().getMethod("getMessage").invoke(event);
+                    if (!(playerObj instanceof Player player)) {
+                        return;
+                    }
+                    String message = String.valueOf(messageObj);
+                    if (message.isBlank()) {
+                        return;
+                    }
+                    RemoteSyncClient.publishChat(player.getUsername(), message);
+                } catch (Exception ignored) {
+                }
+            });
+        } catch (ClassNotFoundException ignored) {
+            // Event name can differ across Minestom versions.
+        }
     }
 
     private static void applyMotd(ServerListPingEvent event, String motd) {
@@ -383,8 +451,64 @@ public final class Main {
                 || block.compare(Block.BARREL);
     }
 
+    private static String blockNamespace(Block block) {
+        if (block == null) {
+            return null;
+        }
+        try {
+            Object namespace = block.getClass().getMethod("namespace").invoke(block);
+            if (namespace != null) {
+                return namespace.toString();
+            }
+        } catch (Exception ignored) {
+        }
+        String raw = block.toString();
+        if (raw.contains(":")) {
+            return raw;
+        }
+        return "minecraft:" + raw.toLowerCase();
+    }
+
+    private static String resolveDimension(Object instance) {
+        if (instance == OVERWORLD_INSTANCE) {
+            return "overworld";
+        }
+        if (instance == NETHER_INSTANCE) {
+            return "nether";
+        }
+        if (instance == END_INSTANCE) {
+            return "end";
+        }
+        return null;
+    }
+
     private static String blockKey(Point point) {
         return point.blockX() + ":" + point.blockY() + ":" + point.blockZ();
+    }
+
+    private static String buildRedirectMessage() {
+        String joinAddress = RUNTIME.authoritativeJoinAddress();
+        if (joinAddress != null && !joinAddress.isBlank()) {
+            return "This node is read-only. Join the authoritative server at " + joinAddress;
+        }
+        return "This node is read-only. Join the authoritative Minestom node.";
+    }
+
+    private static void disconnectReadOnlyNodePlayer(Player player) {
+        String message = buildRedirectMessage();
+        try {
+            player.getClass().getMethod("kick", Component.class).invoke(player, Component.text(message));
+            return;
+        } catch (Exception ignored) {
+            // Fallback API handling for older Minestom builds.
+        }
+        try {
+            player.getClass().getMethod("kick", String.class).invoke(player, message);
+            return;
+        } catch (Exception ignored) {
+            // Final fallback when kick signatures differ.
+        }
+        player.remove();
     }
 
     private static void tickWorldLifecycle(InstanceContainer instance) {

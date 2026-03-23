@@ -13,10 +13,15 @@ public record RuntimeSettings(
         String worldPath,
         boolean onlineMode,
         String motd,
+        boolean authoritativeNode,
+        String authoritativeJoinAddress,
+        int persistIntervalSeconds,
         boolean remoteSyncEnabled,
         String remoteSyncUrl,
         String remoteSyncToken,
-        String remoteSyncServerId
+        String remoteSyncServerId,
+        String remoteSyncClusterId,
+        String remoteSyncAuthoritativeServerId
 ) {
 
     private static final String FILE_NAME = "server.properties";
@@ -56,6 +61,29 @@ public record RuntimeSettings(
                 fileProperties.getProperty("motd", "Minestom Vanilla-like Server")
         );
 
+        boolean authoritativeNode = parseBoolean(
+                firstNonBlank(
+                        System.getenv("AUTHORITATIVE_NODE"),
+                        System.getProperty("server.authoritative-node"),
+                        fileProperties.getProperty("authoritative-node", "true")
+                )
+        );
+
+        String authoritativeJoinAddress = firstNonBlank(
+                System.getenv("AUTHORITATIVE_JOIN_ADDRESS"),
+                System.getProperty("server.authoritative-join-address"),
+                fileProperties.getProperty("authoritative-join-address", "")
+        );
+
+        int persistIntervalSeconds = parsePositiveSeconds(
+                firstNonBlank(
+                        System.getenv("PERSIST_INTERVAL_SECONDS"),
+                        System.getProperty("server.persist-interval-seconds"),
+                        fileProperties.getProperty("persist-interval-seconds", "30")
+                ),
+                30
+        );
+
         boolean remoteSyncEnabled = parseBoolean(
                 firstNonBlank(
                         System.getenv("REMOTE_SYNC_ENABLED"),
@@ -82,16 +110,33 @@ public record RuntimeSettings(
                 fileProperties.getProperty("remote-sync-server-id", "default")
         );
 
+        String remoteSyncClusterId = firstNonBlank(
+                System.getenv("REMOTE_SYNC_CLUSTER_ID"),
+                System.getProperty("server.remote-sync-cluster-id"),
+                fileProperties.getProperty("remote-sync-cluster-id", "default")
+        );
+
+        String remoteSyncAuthoritativeServerId = firstNonBlank(
+                System.getenv("REMOTE_SYNC_AUTHORITATIVE_SERVER_ID"),
+                System.getProperty("server.remote-sync-authoritative-server-id"),
+                fileProperties.getProperty("remote-sync-authoritative-server-id", "authoritative")
+        );
+
         return new RuntimeSettings(
                 bindAddress,
                 bindPort,
                 worldPath,
                 onlineMode,
                 motd,
+                authoritativeNode,
+                authoritativeJoinAddress,
+                persistIntervalSeconds,
                 remoteSyncEnabled,
                 remoteSyncUrl,
                 remoteSyncToken,
-                remoteSyncServerId
+                remoteSyncServerId,
+                remoteSyncClusterId,
+                remoteSyncAuthoritativeServerId
         );
     }
 
@@ -124,12 +169,32 @@ public record RuntimeSettings(
         properties.setProperty("server-port", "25565");
         properties.setProperty("online-mode", "false");
         properties.setProperty("motd", "Minestom Vanilla-like Server");
+        properties.setProperty("authoritative-node", "true");
+        properties.setProperty("authoritative-join-address", "");
+        properties.setProperty("persist-interval-seconds", "30");
         properties.setProperty("world-path", "");
         properties.setProperty("remote-sync-enabled", "false");
         properties.setProperty("remote-sync-url", "");
         properties.setProperty("remote-sync-token", "");
         properties.setProperty("remote-sync-server-id", "default");
+        properties.setProperty("remote-sync-cluster-id", "default");
+        properties.setProperty("remote-sync-authoritative-server-id", "authoritative");
         return properties;
+    }
+
+    private static int parsePositiveSeconds(String raw, int fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) {
+                return fallback;
+            }
+            return value;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private static int parsePort(String rawPort) {

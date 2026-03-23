@@ -46,6 +46,33 @@ def init_db() -> None:
             )
             """
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS block_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id TEXT NOT NULL,
+                source_server_id TEXT NOT NULL,
+                dimension TEXT NOT NULL,
+                x INTEGER NOT NULL,
+                y INTEGER NOT NULL,
+                z INTEGER NOT NULL,
+                block TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id TEXT NOT NULL,
+                source_server_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 @app.before_request
@@ -159,6 +186,140 @@ def get_player_state(server_id: str, player_id: str):
     payload = json.loads(row["payload"])
     payload["updatedAt"] = row["updated_at"]
     return jsonify(payload)
+
+
+@app.post("/api/block-update")
+def save_block_update():
+    if not check_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid json body"}), 400
+
+    cluster_id = str(payload.get("clusterId", "default")).strip() or "default"
+    source_server_id = str(payload.get("sourceServerId", "unknown")).strip() or "unknown"
+    dimension = str(payload.get("dimension", "overworld")).strip() or "overworld"
+    block = str(payload.get("block", "minecraft:air")).strip() or "minecraft:air"
+
+    try:
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        z = int(payload.get("z", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid coordinates"}), 400
+
+    now = utc_now()
+    with get_db() as db:
+        cursor = db.execute(
+            """
+            INSERT INTO block_events(cluster_id, source_server_id, dimension, x, y, z, block, created_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (cluster_id, source_server_id, dimension, x, y, z, block, now),
+        )
+        event_id = cursor.lastrowid
+
+    return {"ok": True, "eventId": event_id}
+
+
+@app.get("/api/block-updates/<cluster_id>")
+def get_block_updates(cluster_id: str):
+    if not check_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    try:
+        since_id = int(request.args.get("since_id", "0"))
+    except ValueError:
+        since_id = 0
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, source_server_id, dimension, x, y, z, block
+            FROM block_events
+            WHERE cluster_id = ? AND id > ?
+            ORDER BY id ASC
+            LIMIT 500
+            """,
+            (cluster_id, since_id),
+        ).fetchall()
+
+    latest = since_id
+    lines = []
+    for row in rows:
+        latest = max(latest, row["id"])
+        safe_block = str(row["block"]).replace("|", "%7C").replace("\n", "%0A")
+        lines.append(
+            f"event:{row['id']}|{row['source_server_id']}|{row['dimension']}|{row['x']}|{row['y']}|{row['z']}|{safe_block}"
+        )
+
+    response_text = "\n".join([f"next_since:{latest}", *lines])
+    return response_text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.post("/api/chat-message")
+def save_chat_message():
+    if not check_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid json body"}), 400
+
+    cluster_id = str(payload.get("clusterId", "default")).strip() or "default"
+    source_server_id = str(payload.get("sourceServerId", "unknown")).strip() or "unknown"
+    username = str(payload.get("username", "")).strip()
+    message = str(payload.get("message", "")).strip()
+    if not username or not message:
+        return jsonify({"error": "username and message required"}), 400
+
+    now = utc_now()
+    with get_db() as db:
+        cursor = db.execute(
+            """
+            INSERT INTO chat_events(cluster_id, source_server_id, username, message, created_at)
+            VALUES(?, ?, ?, ?, ?)
+            """,
+            (cluster_id, source_server_id, username, message, now),
+        )
+        event_id = cursor.lastrowid
+
+    return {"ok": True, "eventId": event_id}
+
+
+@app.get("/api/chat-feed/<cluster_id>")
+def get_chat_feed(cluster_id: str):
+    if not check_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    try:
+        since_id = int(request.args.get("since_id", "0"))
+    except ValueError:
+        since_id = 0
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT id, source_server_id, username, message
+            FROM chat_events
+            WHERE cluster_id = ? AND id > ?
+            ORDER BY id ASC
+            LIMIT 500
+            """,
+            (cluster_id, since_id),
+        ).fetchall()
+
+    latest = since_id
+    lines = []
+    for row in rows:
+        latest = max(latest, row["id"])
+        safe_username = str(row["username"]).replace("|", "%7C").replace("\n", "%0A")
+        safe_message = str(row["message"]).replace("|", "%7C").replace("\n", "%0A")
+        lines.append(f"event:{row['id']}|{row['source_server_id']}|{safe_username}|{safe_message}")
+
+    response_text = "\n".join([f"next_since:{latest}", *lines])
+    return response_text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 if __name__ == "__main__":
